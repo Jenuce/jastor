@@ -1,28 +1,33 @@
 #import "Jastor.h"
 #import "JastorRuntimeHelper.h"
-
+#if !__has_feature(objc_arc)
+#error NSString+JSONCategories must be built with ARC.
+#endif
 @implementation Jastor
 
 @synthesize objectId;
-static NSString *idPropertyName = @"id";
-static NSString *idPropertyNameOnObject = @"objectId";
-
 Class nsDictionaryClass;
 Class nsArrayClass;
 
 + (id)objectFromDictionary:(NSDictionary*)dictionary {
-    id item = [[[self alloc] initWithDictionary:dictionary] autorelease];
+    id item = [[self alloc] initWithDictionary:dictionary];
     return item;
 }
-
+- (NSDictionary*)convertProperyRule{
+    return @{@"objectId":@"id"};
+}
 - (id)initWithDictionary:(NSDictionary *)dictionary {
 	if (!nsDictionaryClass) nsDictionaryClass = [NSDictionary class];
 	if (!nsArrayClass) nsArrayClass = [NSArray class];
-	
+	NSDictionary* rule = [self convertProperyRule];
+    NSString * tempRuleKey = nil;
 	if ((self = [super init])) {
 		for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
-			
-			id value = [dictionary valueForKey:[[self map] valueForKey:key]];
+            tempRuleKey = [rule objectForKey:key];
+            if (tempRuleKey == nil) {
+                tempRuleKey = key;
+            }
+            id value = [dictionary valueForKey:tempRuleKey];
 			
 			if (value == [NSNull null] || value == nil) {
                 continue;
@@ -35,7 +40,7 @@ Class nsArrayClass;
 			// handle dictionary
 			if ([value isKindOfClass:nsDictionaryClass]) {
 				Class klass = [JastorRuntimeHelper propertyClassForPropertyName:key ofClass:[self class]];
-				value = [[[klass alloc] initWithDictionary:value] autorelease];
+				value = [[klass alloc] initWithDictionary:value];
 			}
 			// handle array
 			else if ([value isKindOfClass:nsArrayClass]) {
@@ -44,12 +49,16 @@ Class nsArrayClass;
 				
 				for (id child in value) {
                     if ([[child class] isSubclassOfClass:nsDictionaryClass]) {
-                        Class arrayItemType = [[self class] performSelector:NSSelectorFromString([NSString stringWithFormat:@"%@_class", key])];
-                        if ([arrayItemType isSubclassOfClass:[NSDictionary class]]) {
-                            [childObjects addObject:child];
-                        } else if ([arrayItemType isSubclassOfClass:[Jastor class]]) {
-                            Jastor *childDTO = [[[arrayItemType alloc] initWithDictionary:child] autorelease];
-                            [childObjects addObject:childDTO];
+                        
+                        SEL selector = NSSelectorFromString([NSString stringWithFormat:@"%@_class", key]);
+                        if ([[self class] methodForSelector:selector] != nil) {
+                            Class arrayItemType = ((Class (*)(id, SEL))[[self class] methodForSelector:selector])([self class], selector);
+                            if ([arrayItemType isSubclassOfClass:[NSDictionary class]]) {
+                                [childObjects addObject:child];
+                            } else if ([arrayItemType isSubclassOfClass:[Jastor class]]) {
+                                Jastor *childDTO = [[arrayItemType alloc] initWithDictionary:child];
+                                [childObjects addObject:childDTO];
+                            }
                         }
 					} else {
 						[childObjects addObject:child];
@@ -61,14 +70,6 @@ Class nsArrayClass;
 			// handle all others
 			[self setValue:value forKey:key];
 		}
-		
-		id objectIdValue;
-		if ((objectIdValue = [dictionary objectForKey:idPropertyName]) && objectIdValue != [NSNull null]) {
-			if (![objectIdValue isKindOfClass:[NSString class]]) {
-				objectIdValue = [NSString stringWithFormat:@"%@", objectIdValue];
-			}
-			[self setValue:objectIdValue forKey:idPropertyNameOnObject];
-		}
 	}
 	return self;	
 }
@@ -76,29 +77,37 @@ Class nsArrayClass;
 - (void)dealloc {
 	self.objectId = nil;
 	
-//	for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
-//		//[self setValue:nil forKey:key];
-//	}
+	for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
+		[self setValue:nil forKey:key];
+	}
 	
-	[super dealloc];
 }
 
 - (void)encodeWithCoder:(NSCoder*)encoder {
-	[encoder encodeObject:self.objectId forKey:idPropertyNameOnObject];
+    NSDictionary* rule = [self convertProperyRule];
+    NSString * tempRuleKey = nil;
 	for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
-		[encoder encodeObject:[self valueForKey:key] forKey:key];
+        tempRuleKey = [rule objectForKey:key];
+        if (tempRuleKey == nil) {
+            tempRuleKey = key;
+        }
+		[encoder encodeObject:[self valueForKey:key] forKey:tempRuleKey];
 	}
 }
 
 - (id)initWithCoder:(NSCoder *)decoder {
 	if ((self = [super init])) {
-		[self setValue:[decoder decodeObjectForKey:idPropertyNameOnObject] forKey:idPropertyNameOnObject];
-		
+        NSDictionary* rule = [self convertProperyRule];
+        NSString * tempRuleKey = nil;
 		for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
             if ([JastorRuntimeHelper isPropertyReadOnly:[self class] propertyName:key]) {
                 continue;
             }
-			id value = [decoder decodeObjectForKey:key];
+            tempRuleKey = [rule objectForKey:key];
+            if (tempRuleKey == nil) {
+                tempRuleKey = key;
+            }
+			id value = [decoder decodeObjectForKey:tempRuleKey];
 			if (value != [NSNull null] && value != nil) {
 				[self setValue:value forKey:key];
 			}
@@ -109,14 +118,16 @@ Class nsArrayClass;
 
 - (NSMutableDictionary *)toDictionary {
 	NSMutableDictionary *dic = [NSMutableDictionary dictionary];
-    if (self.objectId) {
-        [dic setObject:self.objectId forKey:idPropertyName];
-    }
-	
+    NSDictionary* rule = [self convertProperyRule];
+    NSString * tempRuleKey = nil;
 	for (NSString *key in [JastorRuntimeHelper propertyNames:[self class]]) {
+        tempRuleKey = [rule objectForKey:key];
+        if (tempRuleKey == nil) {
+            tempRuleKey = key;
+        }
 		id value = [self valueForKey:key];
-        if (value && [value isKindOfClass:[Jastor class]]) {
-			[dic setObject:[value toDictionary] forKey:[[self map] valueForKey:key]];
+        if (value && [value isKindOfClass:[Jastor class]]) {            
+            [dic setObject:[value toDictionary] forKey:tempRuleKey];
         } else if (value && [value isKindOfClass:[NSArray class]] && ((NSArray*)value).count > 0) {
             id internalValue = [value objectAtIndex:0];
             if (internalValue && [internalValue isKindOfClass:[Jastor class]]) {
@@ -124,24 +135,15 @@ Class nsArrayClass;
                 for (id item in value) {
                     [internalItems addObject:[item toDictionary]];
                 }
-				[dic setObject:internalItems forKey:[[self map] valueForKey:key]];
+                [dic setObject:internalItems forKey:tempRuleKey];
             } else {
-				[dic setObject:value forKey:[[self map] valueForKey:key]];
+                [dic setObject:value forKey:tempRuleKey];
             }
         } else if (value != nil) {
-			[dic setObject:value forKey:[[self map] valueForKey:key]];
+            [dic setObject:value forKey:tempRuleKey];
         }
 	}
     return dic;
-}
-
-- (NSDictionary *)map {
-	NSArray *properties = [JastorRuntimeHelper propertyNames:[self class]];
-	NSMutableDictionary *mapDictionary = [[[NSMutableDictionary alloc] initWithCapacity:properties.count] autorelease];
-	for (NSString *property in properties) {
-		[mapDictionary setObject:property forKey:property];
-	}
-	return [NSDictionary dictionaryWithDictionary:mapDictionary];
 }
 
 - (NSString *)description {
